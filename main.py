@@ -7,6 +7,10 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.spatial.distance import cdist
 
+# intel speedup
+from sklearnex import patch_sklearn, unpatch_sklearn
+patch_sklearn()
+
 # for clustering algorithms, see https://scikit-learn.org/stable/modules/clustering.html
 # Partitioning Methods: Kmeans
 # Graph-Based Methods: AffinityPropagation, SpectralClustering
@@ -118,12 +122,12 @@ def make_model_zoo(n_clusters: int=5):
                 "n_clusters": n_clusters,
             }
         },
-        # "dbscan": {
+        # "dbscan": { # `n_clusters` not supported
         #     "api": DBSCAN,
         #     "args": {
         #     }
         # },
-        # "optics": {
+        # "optics": { # `n_clusters` not supported
         #     "api": OPTICS,
         #     "args": {
         #     }
@@ -217,10 +221,10 @@ def get_metrics(data, labels):
 # 数据降维，方便可视化
 def embed(data, embed_dim: int=2, method: str="tsne"):
     if method == "tsne":
-        model = TSNE(n_components=embed_dim, random_state=42)
+        model = TSNE(n_components=embed_dim, random_state=SEED, init="pca", learning_rate="auto")
         embed = model.fit_transform(data)
     elif method == "pca":
-        model = PCA(n_components=embed_dim, random_state=42)
+        model = PCA(n_components=embed_dim, random_state=SEED)
         embed = model.fit_transform(data)
     else:
         raise NotImplementedError(f"embedding method {method} NOT supported.")

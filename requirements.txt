@@ -2,5 +2,6 @@ matplotlib==3.5.1
 numpy==1.21.5
 pandas==1.4.2
 scikit_learn==1.2.0
+scikit_learn_intelex==2021.20220215.102710
 scipy==1.9.1
 seaborn==0.11.2

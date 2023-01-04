@@ -19,9 +19,10 @@ if __name__ == '__main__':
     for col in raw_data.columns:
         data_map[col] = {}
         col_data = raw_data[col].values.tolist()
-        unique_values = np.unique(col_data)
-        print(f"{col}: {np.unique(col_data)}")
-        unique_values = list(unique_values)
+        unique_values = list(np.unique(col_data))
+        if "?" in unique_values:
+            unique_values.remove("?")
+        print(f"{col}: {unique_values}")
         
         new_num_list = []
         if isinstance(col_data[0], str):
@@ -29,9 +30,9 @@ if __name__ == '__main__':
                 if data == "?":
                     new_num_list.append(np.nan)
                 else:
-                    new_num_list.append(unique_values.index(data))
+                    new_num_list.append(unique_values.index(data)+1) # 序从 1 开始
             for i, val in enumerate(unique_values):
-                data_map[col][i] = val
+                data_map[col][i+1] = val # 序从 1 开始
         else:
             new_num_list = col_data
 
