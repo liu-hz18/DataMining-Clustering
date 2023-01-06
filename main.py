@@ -243,12 +243,12 @@ def embed(data, embed_dim: int=2, method: str="tsne"):
     return embed
 
 
-def visualize_cluster(embed_data, label, title: str):
+def visualize_cluster(embed_data, label, title: str, path):
     plt.clf()
     plt.plot()
     plt.scatter(embed_data[:, 0], embed_data[:, 1], c=label, s=8, alpha=[0.8 if l != -1 else 0.1 for l in label])
     plt.title(title)
-    plt.savefig(f"{title}_scatter.png")
+    plt.savefig(f"results/{path}")
 
 
 # 每个类的数量的直方图
@@ -275,7 +275,7 @@ def cluster_size_histogram(results):
     )
     plt.xticks(rotation=20)
     plt.title(f"cluster sizes of different models")
-    plt.savefig(f"cluster_sizes.png")
+    plt.savefig(f"results/cluster_sizes.png")
 
 
 # 和 readmitted 列对比得到直方图
@@ -302,7 +302,7 @@ def readmitted_histogram(original_df, sampled_index, results):
         plt.xlabel("Cluster")
         plt.ylabel("Readmitted")
         plt.title(f"readmitted records in each cluster ({model_name})")
-        plt.savefig(f"readmitted_records_in_each_cluster_{model_name}.png")
+        plt.savefig(f"results/readmitted/{model_name}.png")
 
 
 def readmitted_corr(original_df, sampled_index, results):
@@ -317,7 +317,7 @@ def readmitted_corr(original_df, sampled_index, results):
     plt.clf()
     plt.bar(x=results.keys(), height=corr_list)
     plt.title("Pearson Corr between `readmitted` and `cluster` on different models")
-    plt.savefig("readmitted_corr.png")
+    plt.savefig("results/readmitted/corr.png")
 
 
 # 不同模型在不同cluster数量下的分数
@@ -350,10 +350,18 @@ def ablation_over_cluster_num(data):
         sns.lineplot(data=df, x="clusters", y=metric, hue="model")
         plt.title(f"`{metric}` score over different models and cluster nums")
         plt.legend(loc='upper right')
-        plt.savefig(f"{metric}_over_models_and_cluster_nums.png")
+        plt.savefig(f"results/cluster_num/{metric}.png")
 
 
 def apply(data, sampled_index, n_clusters: int=5):
+    df = {
+        "model": [],
+        "time": [],
+        "silhouette": [],
+        "calinski_harabas": [],
+        "davies_bouldin": [],
+        "hopkins(weighted)": [],
+    }
     results = {}
     model_zoo = make_model_zoo(n_clusters)
     for m in model_zoo.keys():
@@ -375,7 +383,15 @@ def apply(data, sampled_index, n_clusters: int=5):
         print(f"calinski_harabaz_score={metrics['calinski_harabas']}")
         print(f"davies_bouldin_score={metrics['davies_bouldin']}")
         print(f"hopkins_score={metrics['hopkins']}")
+        df["model"].append(m)
+        df["time"].append(end_timestamp - begin_timestamp)
+        df["silhouette"].append(metrics["silhouette"])
+        df["calinski_harabas"].append(metrics["calinski_harabas"])
+        df["davies_bouldin"].append(metrics["davies_bouldin"])
+        df["hopkins(weighted)"].append(metrics["hopkins"])
         print("")
+    df = pd.DataFrame(df)
+    df.to_csv("metrics.csv", index=False)
     return results
 
 parser = argparse.ArgumentParser()
@@ -434,16 +450,16 @@ if __name__ == '__main__':
     if args.visualize == "pca" or args.visualize == "all":
         for method, labels in results.items():
             if method == "kmeans" or method == "Ward" or method == "Afflomerative" or method == "Birch":
-                visualize_cluster(embed_pca, labels, title=f"{method}(PCA)")
+                visualize_cluster(embed_pca, labels, title=f"{method}(PCA)", path=f"pca/{method}.png")
             else:
-                visualize_cluster(embed_pca, labels[sampled_index], title=f"{method}(PCA)")
+                visualize_cluster(embed_pca, labels[sampled_index], title=f"{method}(PCA)", path=f"pca/{method}.png")
 
     if args.visualize == "tsne" or args.visualize == "all":
         for method, labels in results.items():
             if method == "kmeans" or method == "Ward" or method == "Afflomerative" or method == "Birch":
-                visualize_cluster(embed_pca, labels, title=f"{method}(t-SNE)")
+                visualize_cluster(embed_tsne, labels, title=f"{method}(t-SNE)", path=f"tsne/{method}.png")
             else:
-                visualize_cluster(embed_tsne, labels[sampled_index], title=f"{method}(t-SNE)")
+                visualize_cluster(embed_tsne, labels[sampled_index], title=f"{method}(t-SNE)", path=f"tsne/{method}.png")
 
     # 不同算法、聚类个数的 ablation，为加速，只抽样10000个样本
     if args.ablation:
