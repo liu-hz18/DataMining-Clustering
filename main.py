@@ -65,27 +65,27 @@ SEED = 2333
 
 def make_model_zoo(n_clusters: int=5):
     return {
-        # "kmeans": {
-        #     "api": KMeans,
-        #     "args": {
-        #         "n_clusters": n_clusters,
-        #         "random_state": SEED,
-        #     }
-        # },
-        # "batch-kmeans": {
-        #     "api": MiniBatchKMeans,
-        #     "args": {
-        #         "n_clusters": n_clusters,
-        #         "random_state": SEED,
-        #     }
-        # },
-        # "bisecting-Kmeans": {
-        #     "api": BisectingKMeans,
-        #     "args": {
-        #         "n_clusters": n_clusters,
-        #         "random_state": SEED,
-        #     }
-        # },
+        "kmeans": {
+            "api": KMeans,
+            "args": {
+                "n_clusters": n_clusters,
+                "random_state": SEED,
+            }
+        },
+        "batch-kmeans": {
+            "api": MiniBatchKMeans,
+            "args": {
+                "n_clusters": n_clusters,
+                "random_state": SEED,
+            }
+        },
+        "bisecting-Kmeans": {
+            "api": BisectingKMeans,
+            "args": {
+                "n_clusters": n_clusters,
+                "random_state": SEED,
+            }
+        },
         # "affinity": { # slow
         #     "api": AffinityPropagation,
         #     "args": {
@@ -100,36 +100,39 @@ def make_model_zoo(n_clusters: int=5):
         #         "random_state": SEED,
         #     }
         # },
-        # "Ward": {
-        #     "api": AgglomerativeClustering,
-        #     "args": {
-        #         "n_clusters": n_clusters,
-        #         "linkage": "ward",
-        #     }
-        # },
-        # "Afflomerative": {
-        #     "api": AgglomerativeClustering,
-        #     "args": {
-        #         "n_clusters": n_clusters,
-        #         "linkage": "average",
-        #     }
-        # },
+        "Ward": {
+            "api": AgglomerativeClustering,
+            "args": {
+                "n_clusters": n_clusters,
+                "linkage": "ward",
+            }
+        },
+        "Afflomerative": {
+            "api": AgglomerativeClustering,
+            "args": {
+                "n_clusters": n_clusters,
+                "linkage": "average",
+            }
+        },
         "Birch": {
             "api": Birch,
             "args": {
                 "n_clusters": n_clusters,
             }
         },
-        # "dbscan": { # `n_clusters` not supported
-        #     "api": DBSCAN,
-        #     "args": {
-                # "eps": 2.5,
-                # "min_samples": 5,
-        #     }
-        # },
+        "dbscan": { # `n_clusters` not supported
+            "api": DBSCAN,
+            "args": {
+                "eps": 3,
+                "min_samples": 20,
+            }
+        },
         # "optics": { # `n_clusters` not supported
         #     "api": OPTICS,
         #     "args": {
+        #         "min_samples": 50,
+        #         "eps": 3,
+        #         "cluster_method": "dbscan"
         #     }
         # },
         "EM-Gaussian": {
@@ -241,10 +244,11 @@ def embed(data, embed_dim: int=2, method: str="tsne"):
 
 
 def visualize_cluster(embed_data, label, title: str):
+    plt.clf()
     plt.plot()
-    plt.scatter(embed_data[:, 0], embed_data[:, 1], c=label, s=8, alpha=0.8)
+    plt.scatter(embed_data[:, 0], embed_data[:, 1], c=label, s=8, alpha=[0.8 if l != -1 else 0.1 for l in label])
     plt.title(title)
-    plt.show()
+    plt.savefig(f"{title}_scatter.png")
 
 
 # 每个类的数量的直方图
@@ -262,6 +266,7 @@ def cluster_size_histogram(results):
         df["count"].extend(w.tolist())
     df = pd.DataFrame(df)
     print(df.head())
+    plt.clf()
     sns.barplot(
         data=df,
         x="model",
@@ -270,40 +275,49 @@ def cluster_size_histogram(results):
     )
     plt.xticks(rotation=20)
     plt.title(f"cluster sizes of different models")
-    plt.show()
+    plt.savefig(f"cluster_sizes.png")
 
 
 # 和 readmitted 列对比得到直方图
-def readmitted_histogram(original_df, results):
+def readmitted_histogram(original_df, sampled_index, results):
+    origin_readmitted = original_df["readmitted"].values
+    origin_readmitted = origin_readmitted[sampled_index]
     for model_name, labels in results.items():
+        if labels.shape[0] > 10000:
+            labels = labels[sampled_index]
         cluster_group = np.unique(labels)
-        readmitted_group = np.unique(original_df["readmitted"].values)
+        readmitted_group = np.unique(origin_readmitted)
         corr_mat = []
         for cluster in cluster_group:
             corr_list = []
             for readmitted in readmitted_group:
                 cluster_idxes = np.where(labels == cluster)
-                readmitted_idxes = np.where(original_df["readmitted"].values == readmitted)
+                readmitted_idxes = np.where(origin_readmitted == readmitted)
                 corr_list.append(len(np.intersect1d(cluster_idxes, readmitted_idxes)))
             corr_list = np.array(corr_list) / sum(corr_list)
             corr_mat.append(corr_list)
         corr_mat = np.array(corr_mat).T
+        plt.clf()
         sns.heatmap(data=corr_mat, vmin=0.0, vmax=1.0, cmap=sns.cm.rocket_r, annot=True, fmt=".2f", yticklabels=["<30", ">30", "NO"])
         plt.xlabel("Cluster")
         plt.ylabel("Readmitted")
         plt.title(f"readmitted records in each cluster ({model_name})")
-        plt.show()
+        plt.savefig(f"readmitted_records_in_each_cluster_{model_name}.png")
 
 
-def readmitted_corr(original_df, results):
+def readmitted_corr(original_df, sampled_index, results):
     readmitted = original_df["readmitted"].values
+    readmitted = readmitted[sampled_index]
     corr_list = []
     for _, labels in results.items():
+        if labels.shape[0] > 10000:
+            labels = labels[sampled_index]
         corr = np.corrcoef(readmitted, labels)[0][1]
         corr_list.append(corr)
+    plt.clf()
     plt.bar(x=results.keys(), height=corr_list)
     plt.title("Pearson Corr between `readmitted` and `cluster` on different models")
-    plt.show()
+    plt.savefig("readmitted_corr.png")
 
 
 # 不同模型在不同cluster数量下的分数
@@ -319,6 +333,8 @@ def ablation_over_cluster_num(data):
     for n_cluster in [2, 3, 4, 5, 6, 7, 8, 9, 10]:
         model_zoo = make_model_zoo(n_cluster)
         for m in model_zoo.keys():
+            if m == 'dbscan' or m == 'optics':
+                continue
             print(f"Cluster {n_cluster} on model {m}")
             labels = model_zoo[m]["api"](**model_zoo[m]["args"]).fit_predict(data)
             metrics = get_metrics(data, labels)
@@ -330,22 +346,21 @@ def ablation_over_cluster_num(data):
             df["hopkins(weighted)"].append(metrics["hopkins"])
     df = pd.DataFrame(df)
     for metric in ["silhouette", "calinski_harabas", "davies_bouldin", "hopkins(weighted)"]:
+        plt.clf()
         sns.lineplot(data=df, x="clusters", y=metric, hue="model")
         plt.title(f"`{metric}` score over different models and cluster nums")
         plt.legend(loc='upper right')
-        plt.show()
+        plt.savefig(f"{metric}_over_models_and_cluster_nums.png")
 
 
 def apply(data, sampled_index, n_clusters: int=5):
     results = {}
     model_zoo = make_model_zoo(n_clusters)
     for m in model_zoo.keys():
-        if m == 'DBSCAN' or m == 'OPTICS':
-            continue
         print(m)
         begin_timestamp = time.time()
-        # 凝聚化聚类算法时间复杂度和空间复杂度较高，不适用于大样本情况
-        if m == "Ward" or m == "Afflomerative":
+        # 简单kmeans、凝聚化聚类算法时间复杂度和空间复杂度较高，不适用于大样本情况
+        if m == "kmeans" or m == "Ward" or m == "Afflomerative" or m == "Birch":
             labels = model_zoo[m]["api"](**model_zoo[m]["args"]).fit_predict(data[sampled_index])
             end_timestamp = time.time()
             metrics = get_metrics(data[sampled_index], labels)
@@ -412,20 +427,20 @@ if __name__ == '__main__':
     cluster_size_histogram(results)
 
     # 回答 readmitted 和 聚类 关联性 的问题
-    readmitted_corr(original_df, results)
-    readmitted_histogram(original_df, results)
+    readmitted_corr(original_df, sampled_index, results)
+    readmitted_histogram(original_df, sampled_index, results)
 
     # 聚类结果可视化
     if args.visualize == "pca" or args.visualize == "all":
         for method, labels in results.items():
-            if method == "Ward" or method == "Afflomerative":
+            if method == "kmeans" or method == "Ward" or method == "Afflomerative" or method == "Birch":
                 visualize_cluster(embed_pca, labels, title=f"{method}(PCA)")
             else:
                 visualize_cluster(embed_pca, labels[sampled_index], title=f"{method}(PCA)")
 
     if args.visualize == "tsne" or args.visualize == "all":
         for method, labels in results.items():
-            if method == "Ward" or method == "Afflomerative":
+            if method == "kmeans" or method == "Ward" or method == "Afflomerative" or method == "Birch":
                 visualize_cluster(embed_pca, labels, title=f"{method}(t-SNE)")
             else:
                 visualize_cluster(embed_tsne, labels[sampled_index], title=f"{method}(t-SNE)")
