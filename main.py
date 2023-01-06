@@ -7,10 +7,6 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.spatial.distance import cdist
 
-# intel speedup
-from sklearnex import patch_sklearn, unpatch_sklearn
-patch_sklearn()
-
 # for clustering algorithms, see https://scikit-learn.org/stable/modules/clustering.html
 # Partitioning Methods: Kmeans
 # Graph-Based Methods: AffinityPropagation, SpectralClustering
@@ -55,13 +51,12 @@ from sklearn.metrics.cluster import (
 
 from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
 
 # 全局变量
 DATA_PATH = "./data/cleaned.csv"
-# 是否作归一化
-# !NOTE: 使用PCA降维必须要归一化 
-NORMALIZE = True
+# 聚类前是否作归一化
+NORMALIZE = False
 SEED = 2333
 
 
@@ -69,6 +64,7 @@ def make_model_zoo(n_clusters: int=5):
     return {
         "kmeans": {
             "api": KMeans,
+            "normalize": NORMALIZE,
             "args": {
                 "n_clusters": n_clusters,
                 "random_state": SEED,
@@ -76,6 +72,7 @@ def make_model_zoo(n_clusters: int=5):
         },
         "batch-kmeans": {
             "api": MiniBatchKMeans,
+            "normalize": NORMALIZE,
             "args": {
                 "n_clusters": n_clusters,
                 "random_state": SEED,
@@ -83,6 +80,7 @@ def make_model_zoo(n_clusters: int=5):
         },
         "bisecting-Kmeans": {
             "api": BisectingKMeans,
+            "normalize": NORMALIZE,
             "args": {
                 "n_clusters": n_clusters,
                 "random_state": SEED,
@@ -90,6 +88,7 @@ def make_model_zoo(n_clusters: int=5):
         },
         # "affinity": { # slow
         #     "api": AffinityPropagation,
+        #     "normalize": NORMALIZE,
         #     "args": {
         #         "damping": 0.5,
         #         "random_state": SEED,
@@ -97,6 +96,7 @@ def make_model_zoo(n_clusters: int=5):
         # },
         # "spectral": { # very slow
         #     "api": SpectralClustering,
+        #     "normalize": NORMALIZE,
         #     "args": {
         #         "n_clusters": n_clusters,
         #         "random_state": SEED,
@@ -104,13 +104,15 @@ def make_model_zoo(n_clusters: int=5):
         # },
         "Ward": {
             "api": AgglomerativeClustering,
+            "normalize": NORMALIZE,
             "args": {
                 "n_clusters": n_clusters,
                 "linkage": "ward",
             }
         },
-        "Afflomerative": {
+        "Agglomerative": {
             "api": AgglomerativeClustering,
+            "normalize": NORMALIZE,
             "args": {
                 "n_clusters": n_clusters,
                 "linkage": "average",
@@ -118,22 +120,28 @@ def make_model_zoo(n_clusters: int=5):
         },
         "Brich": {
             "api": Birch,
+            "normalize": NORMALIZE,
             "args": {
                 "n_clusters": n_clusters,
             }
         },
-        # "dbscan": { # `n_clusters` not supported
-        #     "api": DBSCAN,
-        #     "args": {
-        #     }
-        # },
-        # "optics": { # `n_clusters` not supported
-        #     "api": OPTICS,
-        #     "args": {
-        #     }
-        # },
+        "dbscan": { # `n_clusters` not supported
+            "api": DBSCAN,
+            "normalize": NORMALIZE,
+            "args": {
+                "eps": 2,
+                "min_samples": 20,
+            }
+        },
+        "optics": { # `n_clusters` not supported
+            "api": OPTICS,
+            "normalize": NORMALIZE,
+            "args": {
+            }
+        },
         "EM-Gaussian": {
             "api": GaussianMixture,
+            "normalize": True,
             "args": {
                 "n_components": n_clusters,
                 "random_state": SEED,
@@ -141,12 +149,14 @@ def make_model_zoo(n_clusters: int=5):
         },
         "Bayesian-Gaussian": {
             "api": BayesianGaussianMixture,
+            "normalize": True,
             "args": {
                 "n_components": n_clusters,
                 "random_state": SEED,
             }
         }
     }
+
 
 def set_all_seed(seed):
     random.seed(seed)
@@ -219,7 +229,9 @@ def get_metrics(data, labels):
 
 
 # 数据降维，方便可视化
-def embed(data, embed_dim: int=2, method: str="tsne"):
+def embed(data, embed_dim: int=2, method: str="tsne", normalize: bool=False):
+    if normalize:
+        data = StandardScaler().fit_transform(data)
     if method == "tsne":
         model = TSNE(n_components=embed_dim, random_state=SEED, init="pca", learning_rate="auto")
         embed = model.fit_transform(data)
@@ -245,7 +257,8 @@ def cluster_size_histogram(results):
         "cluster": [],
         "count": [],
     }
-    for model_name, labels in results.items():
+    for model_name, values in results.items():
+        labels = values["label"]
         groups = np.unique(labels)
         w = np.sort(np.array([np.sum(labels == g) for g in groups]))[::-1]
         df["model"].extend([model_name] * len(groups))
@@ -264,9 +277,10 @@ def cluster_size_histogram(results):
     plt.show()
 
 
-# 和 readmitted 列对比得到直方图
-def readmitted_histogram(original_df, results):
-    for model_name, labels in results.items():
+# 和 readmitted 列对比得到heatmap
+def readmitted_heatmap(original_df, results):
+    for model_name, values in results.items():
+        labels = values["label"]
         cluster_group = np.unique(labels)
         readmitted_group = np.unique(original_df["readmitted"].values)
         corr_mat = []
@@ -289,7 +303,8 @@ def readmitted_histogram(original_df, results):
 def readmitted_corr(original_df, results):
     readmitted = original_df["readmitted"].values
     corr_list = []
-    for _, labels in results.items():
+    for _, values in results.items():
+        labels = values["label"]
         corr = np.corrcoef(readmitted, labels)[0][1]
         corr_list.append(corr)
     plt.bar(x=results.keys(), height=corr_list)
@@ -311,8 +326,12 @@ def ablation_over_cluster_num(data):
         model_zoo = make_model_zoo(n_cluster)
         for m in model_zoo.keys():
             print(f"Cluster {n_cluster} on model {m}")
-            labels = model_zoo[m]["api"](**model_zoo[m]["args"]).fit_predict(data)
-            metrics = get_metrics(data, labels)
+            if model_zoo[m]["normalize"]:
+                scaled_data = StandardScaler().fit_transform(data)
+            else:
+                scaled_data = data
+            labels = model_zoo[m]["api"](**model_zoo[m]["args"]).fit_predict(scaled_data)
+            metrics = get_metrics(scaled_data, labels)
             df["model"].append(m)
             df["clusters"].append(n_cluster)
             df["silhouette"].append(metrics["silhouette"])
@@ -332,21 +351,26 @@ def apply(data, n_clusters: int=5):
     model_zoo = make_model_zoo(n_clusters)
     for m in model_zoo.keys():
         print(m)
+        if model_zoo[m]["normalize"]:
+            scaled_data = StandardScaler().fit_transform(data)
+        else:
+            scaled_data = data
         begin_timestamp = time.time()
-        labels = model_zoo[m]["api"](**model_zoo[m]["args"]).fit_predict(data)
+        labels = model_zoo[m]["api"](**model_zoo[m]["args"]).fit_predict(scaled_data)
         end_timestamp = time.time()
-        results[m] = labels
-        # print(labels)
+        results[m] = {
+            "label": labels,
+            "normalize": model_zoo[m]["normalize"],
+        }
         print(f"time elapsed={end_timestamp - begin_timestamp}")
-        print(f"silhouette_score={silhouette_score(data, labels)}")
-        print(f"calinski_harabaz_score={calinski_harabasz_score(data, labels)}")
-        print(f"davies_bouldin_score={davies_bouldin_score(data, labels)}")
-        print(f"hopkins_score={hopkins_score(data, labels, sampling_ratio=0.3, reduction='weighted')}")
+        print(f"silhouette_score={silhouette_score(scaled_data, labels)}")
+        print(f"calinski_harabaz_score={calinski_harabasz_score(scaled_data, labels)}")
+        print(f"davies_bouldin_score={davies_bouldin_score(scaled_data, labels)}")
+        print(f"hopkins_score={hopkins_score(scaled_data, labels, sampling_ratio=0.3, reduction='weighted')}")
         print("")
     return results
 
 
-# TODO: 评估：算法复杂度、稳定性
 if __name__ == '__main__':
     set_all_seed(SEED)
     plt.style.use('ggplot')
@@ -357,23 +381,23 @@ if __name__ == '__main__':
     # 删除前两个无用的ID列
     original_df.drop("encounter_id", axis=1, inplace=True)
     original_df.drop("patient_nbr", axis=1, inplace=True)
+    # 删除几个数据缺失率太高的列
+    original_df.drop("weight", axis=1, inplace=True)
+    original_df.drop("payer_code", axis=1, inplace=True)
+    original_df.drop("medical_specialty", axis=1, inplace=True)
     # 训练数据 需要 删除 readmitted 列
     df = original_df.drop("readmitted", axis=1)
     df.fillna(0, inplace=True)
 
     # 获得 [n_samples, n_features] 的矩阵
-    data = df.values
+    raw_data = df.values
 
     if NORMALIZE:
-        data = StandardScaler().fit_transform(data)
+        data = StandardScaler().fit_transform(raw_data)
+    else:
+        data = raw_data
     # 聚类前的 hopkins_statistic
     print(f"hopkins_statistic={hopkins_statistic(data, sampling_ratio=0.3)}")
-
-    # 降维
-    embed_pca = embed(data, method="pca")
-    print(embed_pca.shape)
-    embed_tsne = embed(data, method="tsne")
-    print(embed_tsne.shape)
 
     # 跑一遍各种算法
     results = apply(data, n_clusters=5)
@@ -383,14 +407,22 @@ if __name__ == '__main__':
 
     # 回答 readmitted 和 聚类 关联性 的问题
     readmitted_corr(original_df, results)
-    readmitted_histogram(original_df, results)
+    readmitted_heatmap(original_df, results)
 
-    # 聚类结果可视化
-    for method, labels in results.items():
-        visualize_cluster(embed_pca, labels, title=f"{method}(PCA)")
+    # 降维+聚类结果可视化
+    embed_pca = embed(raw_data, method="pca", normalize=False)
+    embed_pca_norm = embed(raw_data, method="pca", normalize=True)
+    print(raw_data.shape)
+    print(embed_pca.shape)
+    for method, values in results.items():
+        visualize_cluster(embed_pca_norm if values["normalize"] else embed_pca, values["label"], title=f"{method}(PCA)")
 
-    for method, labels in results.items():
-        visualize_cluster(embed_tsne, labels, title=f"{method}(t-SNE)")
+    embed_tsne = embed(raw_data, method="tsne", normalize=False)
+    embed_tsne_norm = embed(raw_data, method="tsne", normalize=True)
+    print(raw_data.shape)
+    print(embed_tsne.shape)
+    for method, values in results.items():
+        visualize_cluster(embed_tsne_norm if values["normalize"] else embed_tsne, values["label"], title=f"{method}(t-SNE)")
 
     # 不同算法、聚类个数的 ablation
     ablation_over_cluster_num(data)
