@@ -6,6 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.spatial.distance import cdist
+import argparse
 
 # for clustering algorithms, see https://scikit-learn.org/stable/modules/clustering.html
 # Partitioning Methods: Kmeans
@@ -118,7 +119,7 @@ def make_model_zoo(n_clusters: int=5):
                 "linkage": "average",
             }
         },
-        "Brich": {
+        "Birch": {
             "api": Birch,
             "normalize": NORMALIZE,
             "args": {
@@ -167,14 +168,19 @@ def set_all_seed(seed):
 
 # n维霍普金斯统计量计算，input:DataFrame类型的二维数据，output:float类型的霍普金斯统计量
 # 默认从数据集中抽样的比例为0.3
-def hopkins_statistic(data: np.ndarray, sampling_ratio: float=0.3) -> float:
-    if data.shape[0] <= 1:
+def hopkins_statistic(_data: np.ndarray, sampling_ratio: float=0.3) -> float:
+    if _data.shape[0] <= 1:
         return 0.5
     # 抽样比例超过0.1到0.5区间任意一端则用端点值代替
-    sampling_ratio = min(max(sampling_ratio, 0.1), 0.5)
+    sampling_ratio = np.clip(sampling_ratio, 0.1, 0.5)
+    if _data.shape[0] > 10000:
+        data = _data[np.random.choice(_data.shape[0], 10000, replace=False), :]
+    else:
+        data = _data
     num_data = data.shape[0]
     # 抽样数量
     n_samples = int(np.ceil(num_data * sampling_ratio))
+    # print("n_samples of hopkins_statistic: ", n_samples)
     # 原始数据中抽取的样本数据
     sample_idxes = np.random.choice(a=num_data, size=n_samples, replace=False)
     sample_data = data[sample_idxes, :]
@@ -220,6 +226,10 @@ def hopkins_score(data: np.ndarray, labels: np.ndarray, sampling_ratio: float=0.
 
 
 def get_metrics(data, labels):
+    if data.shape[0] > 10000:
+        _sampled_index = np.random.choice(data.shape[0], 10000, replace=False)
+        data = data[_sampled_index, :]
+        labels = labels[_sampled_index]
     return {
         "silhouette": silhouette_score(data, labels),
         "calinski_harabas": calinski_harabasz_score(data, labels),
@@ -243,11 +253,12 @@ def embed(data, embed_dim: int=2, method: str="tsne", normalize: bool=False):
     return embed
 
 
-def visualize_cluster(embed_data, label, title: str):
+def visualize_cluster(embed_data, label, title: str, path):
+    plt.clf()
     plt.plot()
-    plt.scatter(embed_data[:, 0], embed_data[:, 1], c=label, s=8, alpha=0.8)
+    plt.scatter(embed_data[:, 0], embed_data[:, 1], c=label, s=8, alpha=[0.8 if l != -1 else 0.1 for l in label])
     plt.title(title)
-    plt.show()
+    plt.savefig(f"results/{path}")
 
 
 # 每个类的数量的直方图
@@ -266,6 +277,7 @@ def cluster_size_histogram(results):
         df["count"].extend(w.tolist())
     df = pd.DataFrame(df)
     print(df.head())
+    plt.clf()
     sns.barplot(
         data=df,
         x="model",
@@ -274,7 +286,7 @@ def cluster_size_histogram(results):
     )
     plt.xticks(rotation=20)
     plt.title(f"cluster sizes of different models")
-    plt.show()
+    plt.savefig(f"results/cluster_sizes.png")
 
 
 # 和 readmitted 列对比得到heatmap
@@ -293,23 +305,26 @@ def readmitted_heatmap(original_df, results):
             corr_list = np.array(corr_list) / sum(corr_list)
             corr_mat.append(corr_list)
         corr_mat = np.array(corr_mat).T
+        plt.clf()
         sns.heatmap(data=corr_mat, vmin=0.0, vmax=1.0, cmap=sns.cm.rocket_r, annot=True, fmt=".2f", yticklabels=["<30", ">30", "NO"])
         plt.xlabel("Cluster")
         plt.ylabel("Readmitted")
         plt.title(f"readmitted records in each cluster ({model_name})")
-        plt.show()
+        plt.savefig(f"results/readmitted/{model_name}.png")
 
 
-def readmitted_corr(original_df, results):
+def readmitted_corr(original_df, sampled_index, results):
     readmitted = original_df["readmitted"].values
+    readmitted = readmitted[sampled_index]
     corr_list = []
     for _, values in results.items():
         labels = values["label"]
         corr = np.corrcoef(readmitted, labels)[0][1]
         corr_list.append(corr)
+    plt.clf()
     plt.bar(x=results.keys(), height=corr_list)
     plt.title("Pearson Corr between `readmitted` and `cluster` on different models")
-    plt.show()
+    plt.savefig("results/readmitted/corr.png")
 
 
 # 不同模型在不同cluster数量下的分数
@@ -325,6 +340,8 @@ def ablation_over_cluster_num(data):
     for n_cluster in [2, 3, 4, 5, 6, 7, 8, 9, 10]:
         model_zoo = make_model_zoo(n_cluster)
         for m in model_zoo.keys():
+            if m == 'dbscan' or m == 'optics':
+                continue
             print(f"Cluster {n_cluster} on model {m}")
             if model_zoo[m]["normalize"]:
                 scaled_data = StandardScaler().fit_transform(data)
@@ -340,13 +357,22 @@ def ablation_over_cluster_num(data):
             df["hopkins(weighted)"].append(metrics["hopkins"])
     df = pd.DataFrame(df)
     for metric in ["silhouette", "calinski_harabas", "davies_bouldin", "hopkins(weighted)"]:
+        plt.clf()
         sns.lineplot(data=df, x="clusters", y=metric, hue="model")
         plt.title(f"`{metric}` score over different models and cluster nums")
         plt.legend(loc='upper right')
-        plt.show()
+        plt.savefig(f"results/cluster_num/{metric}.png")
 
 
-def apply(data, n_clusters: int=5):
+def apply(data, sampled_index, n_clusters: int=5):
+    df = {
+        "model": [],
+        "time": [],
+        "silhouette": [],
+        "calinski_harabas": [],
+        "davies_bouldin": [],
+        "hopkins(weighted)": [],
+    }
     results = {}
     model_zoo = make_model_zoo(n_clusters)
     for m in model_zoo.keys():
@@ -368,6 +394,8 @@ def apply(data, n_clusters: int=5):
         print(f"davies_bouldin_score={davies_bouldin_score(scaled_data, labels)}")
         print(f"hopkins_score={hopkins_score(scaled_data, labels, sampling_ratio=0.3, reduction='weighted')}")
         print("")
+    df = pd.DataFrame(df)
+    df.to_csv("metrics.csv", index=False)
     return results
 
 
@@ -377,7 +405,7 @@ if __name__ == '__main__':
 
     original_df = pd.read_csv(DATA_PATH)
     # 随机抽一小部分, 不然现在 OOM
-    original_df = original_df.sample(n=10000)
+    original_df = original_df.sample(n=10000, random_state=SEED)
     # 删除前两个无用的ID列
     original_df.drop("encounter_id", axis=1, inplace=True)
     original_df.drop("patient_nbr", axis=1, inplace=True)
@@ -424,5 +452,5 @@ if __name__ == '__main__':
     for method, values in results.items():
         visualize_cluster(embed_tsne_norm if values["normalize"] else embed_tsne, values["label"], title=f"{method}(t-SNE)")
 
-    # 不同算法、聚类个数的 ablation
+    # 不同算法、聚类个数的 ablation，为加速，只抽样10000个样本
     ablation_over_cluster_num(data)
