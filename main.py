@@ -6,10 +6,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.spatial.distance import cdist
+import argparse
 
 # intel speedup
-from sklearnex import patch_sklearn, unpatch_sklearn
-patch_sklearn()
+# from sklearnex import patch_sklearn, unpatch_sklearn
+# patch_sklearn()
 
 # for clustering algorithms, see https://scikit-learn.org/stable/modules/clustering.html
 # Partitioning Methods: Kmeans
@@ -57,37 +58,34 @@ from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 
-# 全局变量
-DATA_PATH = "./data/cleaned.csv"
 # 是否作归一化
-# !NOTE: 使用PCA降维必须要归一化 
-NORMALIZE = True
+NORMALIZE = False
 SEED = 2333
 
 
 def make_model_zoo(n_clusters: int=5):
     return {
-        "kmeans": {
-            "api": KMeans,
-            "args": {
-                "n_clusters": n_clusters,
-                "random_state": SEED,
-            }
-        },
-        "batch-kmeans": {
-            "api": MiniBatchKMeans,
-            "args": {
-                "n_clusters": n_clusters,
-                "random_state": SEED,
-            }
-        },
-        "bisecting-Kmeans": {
-            "api": BisectingKMeans,
-            "args": {
-                "n_clusters": n_clusters,
-                "random_state": SEED,
-            }
-        },
+        # "kmeans": {
+        #     "api": KMeans,
+        #     "args": {
+        #         "n_clusters": n_clusters,
+        #         "random_state": SEED,
+        #     }
+        # },
+        # "batch-kmeans": {
+        #     "api": MiniBatchKMeans,
+        #     "args": {
+        #         "n_clusters": n_clusters,
+        #         "random_state": SEED,
+        #     }
+        # },
+        # "bisecting-Kmeans": {
+        #     "api": BisectingKMeans,
+        #     "args": {
+        #         "n_clusters": n_clusters,
+        #         "random_state": SEED,
+        #     }
+        # },
         # "affinity": { # slow
         #     "api": AffinityPropagation,
         #     "args": {
@@ -102,21 +100,21 @@ def make_model_zoo(n_clusters: int=5):
         #         "random_state": SEED,
         #     }
         # },
-        "Ward": {
-            "api": AgglomerativeClustering,
-            "args": {
-                "n_clusters": n_clusters,
-                "linkage": "ward",
-            }
-        },
-        "Afflomerative": {
-            "api": AgglomerativeClustering,
-            "args": {
-                "n_clusters": n_clusters,
-                "linkage": "average",
-            }
-        },
-        "Brich": {
+        # "Ward": {
+        #     "api": AgglomerativeClustering,
+        #     "args": {
+        #         "n_clusters": n_clusters,
+        #         "linkage": "ward",
+        #     }
+        # },
+        # "Afflomerative": {
+        #     "api": AgglomerativeClustering,
+        #     "args": {
+        #         "n_clusters": n_clusters,
+        #         "linkage": "average",
+        #     }
+        # },
+        "Birch": {
             "api": Birch,
             "args": {
                 "n_clusters": n_clusters,
@@ -125,6 +123,8 @@ def make_model_zoo(n_clusters: int=5):
         # "dbscan": { # `n_clusters` not supported
         #     "api": DBSCAN,
         #     "args": {
+                # "eps": 2.5,
+                # "min_samples": 5,
         #     }
         # },
         # "optics": { # `n_clusters` not supported
@@ -157,14 +157,19 @@ def set_all_seed(seed):
 
 # n维霍普金斯统计量计算，input:DataFrame类型的二维数据，output:float类型的霍普金斯统计量
 # 默认从数据集中抽样的比例为0.3
-def hopkins_statistic(data: np.ndarray, sampling_ratio: float=0.3) -> float:
-    if data.shape[0] <= 1:
+def hopkins_statistic(_data: np.ndarray, sampling_ratio: float=0.3) -> float:
+    if _data.shape[0] <= 1:
         return 0.5
     # 抽样比例超过0.1到0.5区间任意一端则用端点值代替
-    sampling_ratio = min(max(sampling_ratio, 0.1), 0.5)
+    sampling_ratio = np.clip(sampling_ratio, 0.1, 0.5)
+    if _data.shape[0] > 10000:
+        data = _data[np.random.choice(_data.shape[0], 10000, replace=False), :]
+    else:
+        data = _data
     num_data = data.shape[0]
     # 抽样数量
     n_samples = int(np.ceil(num_data * sampling_ratio))
+    # print("n_samples of hopkins_statistic: ", n_samples)
     # 原始数据中抽取的样本数据
     sample_idxes = np.random.choice(a=num_data, size=n_samples, replace=False)
     sample_data = data[sample_idxes, :]
@@ -210,6 +215,10 @@ def hopkins_score(data: np.ndarray, labels: np.ndarray, sampling_ratio: float=0.
 
 
 def get_metrics(data, labels):
+    if data.shape[0] > 10000:
+        _sampled_index = np.random.choice(data.shape[0], 10000, replace=False)
+        data = data[_sampled_index, :]
+        labels = labels[_sampled_index]
     return {
         "silhouette": silhouette_score(data, labels),
         "calinski_harabas": calinski_harabasz_score(data, labels),
@@ -327,33 +336,50 @@ def ablation_over_cluster_num(data):
         plt.show()
 
 
-def apply(data, n_clusters: int=5):
+def apply(data, sampled_index, n_clusters: int=5):
     results = {}
     model_zoo = make_model_zoo(n_clusters)
     for m in model_zoo.keys():
+        if m == 'DBSCAN' or m == 'OPTICS':
+            continue
         print(m)
         begin_timestamp = time.time()
-        labels = model_zoo[m]["api"](**model_zoo[m]["args"]).fit_predict(data)
-        end_timestamp = time.time()
+        # 凝聚化聚类算法时间复杂度和空间复杂度较高，不适用于大样本情况
+        if m == "Ward" or m == "Afflomerative":
+            labels = model_zoo[m]["api"](**model_zoo[m]["args"]).fit_predict(data[sampled_index])
+            end_timestamp = time.time()
+            metrics = get_metrics(data[sampled_index], labels)
+        else:
+            labels = model_zoo[m]["api"](**model_zoo[m]["args"]).fit_predict(data)
+            end_timestamp = time.time()
+            metrics = get_metrics(data, labels)
         results[m] = labels
         # print(labels)
         print(f"time elapsed={end_timestamp - begin_timestamp}")
-        print(f"silhouette_score={silhouette_score(data, labels)}")
-        print(f"calinski_harabaz_score={calinski_harabasz_score(data, labels)}")
-        print(f"davies_bouldin_score={davies_bouldin_score(data, labels)}")
-        print(f"hopkins_score={hopkins_score(data, labels, sampling_ratio=0.3, reduction='weighted')}")
+        print(f"silhouette_score={metrics['silhouette']}")
+        print(f"calinski_harabaz_score={metrics['calinski_harabas']}")
+        print(f"davies_bouldin_score={metrics['davies_bouldin']}")
+        print(f"hopkins_score={metrics['hopkins']}")
         print("")
     return results
 
+parser = argparse.ArgumentParser()
+parser.add_argument("--data_path", type=str, default="./data/cleaned.csv", help="数据集路径")
+parser.add_argument("--no_standardize", action="store_true", default=False, help="是否对数据进行归一化")
+parser.add_argument("--sample", type=int, default=-1, help="随机抽样的样本数, -1 表示不抽样")
+parser.add_argument("--visualize", type=str, choices=["pca", "tsne", "none", "all"], default="all", help="是否可视化以及可视化方式")
+parser.add_argument("--ablation", action="store_true", default=False, help="是否进行ablation实验")
+args = parser.parse_args()
 
 # TODO: 评估：算法复杂度、稳定性
 if __name__ == '__main__':
     set_all_seed(SEED)
     plt.style.use('ggplot')
 
-    original_df = pd.read_csv(DATA_PATH)
+    original_df = pd.read_csv(args.data_path)
     # 随机抽一小部分, 不然现在 OOM
-    original_df = original_df.sample(n=10000)
+    if args.sample > 0:
+        original_df = original_df.sample(n=args.sample, random_state=SEED)
     # 删除前两个无用的ID列
     original_df.drop("encounter_id", axis=1, inplace=True)
     original_df.drop("patient_nbr", axis=1, inplace=True)
@@ -363,20 +389,24 @@ if __name__ == '__main__':
 
     # 获得 [n_samples, n_features] 的矩阵
     data = df.values
+    # 抽样10000个样本用于可视化与凝聚化聚类
+    sampled_index = np.random.choice(data.shape[0], 10000, replace=False)
 
-    if NORMALIZE:
+    if not args.no_standardize:
         data = StandardScaler().fit_transform(data)
     # 聚类前的 hopkins_statistic
     print(f"hopkins_statistic={hopkins_statistic(data, sampling_ratio=0.3)}")
 
     # 降维
-    embed_pca = embed(data, method="pca")
-    print(embed_pca.shape)
-    embed_tsne = embed(data, method="tsne")
-    print(embed_tsne.shape)
+    if args.visualize == "pca" or args.visualize == "all":
+        embed_pca = embed(data[sampled_index, :], method="pca")
+        print(embed_pca.shape)
+    if args.visualize == "tsne" or args.visualize == "all":
+        embed_tsne = embed(data[sampled_index, :], method="tsne")
+        print(embed_tsne.shape)
 
     # 跑一遍各种算法
-    results = apply(data, n_clusters=5)
+    results = apply(data, sampled_index, n_clusters=5)
 
     # 不同算法 每类容量 的统计图
     cluster_size_histogram(results)
@@ -386,11 +416,20 @@ if __name__ == '__main__':
     readmitted_histogram(original_df, results)
 
     # 聚类结果可视化
-    for method, labels in results.items():
-        visualize_cluster(embed_pca, labels, title=f"{method}(PCA)")
+    if args.visualize == "pca" or args.visualize == "all":
+        for method, labels in results.items():
+            if method == "Ward" or method == "Afflomerative":
+                visualize_cluster(embed_pca, labels, title=f"{method}(PCA)")
+            else:
+                visualize_cluster(embed_pca, labels[sampled_index], title=f"{method}(PCA)")
 
-    for method, labels in results.items():
-        visualize_cluster(embed_tsne, labels, title=f"{method}(t-SNE)")
+    if args.visualize == "tsne" or args.visualize == "all":
+        for method, labels in results.items():
+            if method == "Ward" or method == "Afflomerative":
+                visualize_cluster(embed_pca, labels, title=f"{method}(t-SNE)")
+            else:
+                visualize_cluster(embed_tsne, labels[sampled_index], title=f"{method}(t-SNE)")
 
-    # 不同算法、聚类个数的 ablation
-    ablation_over_cluster_num(data)
+    # 不同算法、聚类个数的 ablation，为加速，只抽样10000个样本
+    if args.ablation:
+        ablation_over_cluster_num(data[sampled_index, :])
